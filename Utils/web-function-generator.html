@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Function Table Generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .toolbar {
+            grid-column: 1 / -1;
+            display: flex;
+            gap: 10px;
+            padding-bottom: 20px;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 20px;
+            background: #f8f8f8;
+            border-radius: 8px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-weight: 500;
+            color: #333;
+        }
+        input, select {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            height: 400px;
+        }
+        .range-group {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 10px;
+            align-items: center;
+        }
+        .status {
+            grid-column: 1 / -1;
+            padding: 10px;
+            margin-top: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.success {
+            display: block;
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            display: block;
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="toolbar">
+            <button onclick="loadConfig()">Load Config</button>
+            <button onclick="saveConfig()">Save Config</button>
+            <button onclick="loadData()">Load Data</button>
+            <button onclick="generateData()">Generate</button>
+            <button onclick="saveData()">Save Data</button>
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label for="function">Function:</label>
+                <select id="function">
+                    <option value="sin">SIN</option>
+                    <option value="cos">COS</option>
+                    <option value="custom">CUSTOM</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Range (degrees):</label>
+                <div class="range-group">
+                    <input type="number" id="rangeMin" value="0">
+                    <span>to</span>
+                    <input type="number" id="rangeMax" value="360">
+                </div>
+            </div>
+            <div class="control-group">
+                <label for="scale">Scale:</label>
+                <input type="number" id="scale" value="32768">
+            </div>
+            <div class="control-group">
+                <label for="entries">Number of entries:</label>
+                <input type="number" id="entries" value="360">
+            </div>
+            <div class="control-group">
+                <label for="size">Entry size (bits):</label>
+                <select id="size">
+                    <option value="8">8</option>
+                    <option value="16" selected>16</option>
+                    <option value="32">32</option>
+                </select>
+            </div>
+        </div>
+        <div class="chart-container">
+            <canvas id="chart"></canvas>
+        </div>
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        let chart = null;
+        let generatedData = null;
+
+        function initChart() {
+            const ctx = document.getElementById('chart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Generated Values',
+                        data: [],
+                        borderColor: '#007bff',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function generateData() {
+            const func = document.getElementById('function').value;
+            const minDeg = parseFloat(document.getElementById('rangeMin').value);
+            const maxDeg = parseFloat(document.getElementById('rangeMax').value);
+            const scale = parseFloat(document.getElementById('scale').value);
+            const entries = parseInt(document.getElementById('entries').value);
+
+            // Generate x values (degrees)
+            const step = (maxDeg - minDeg) / (entries - 1);
+            const degrees = Array.from({length: entries}, (_, i) => minDeg + i * step);
+            
+            // Generate y values
+            generatedData = degrees.map(deg => {
+                const rad = deg * Math.PI / 180;
+                const val = func === 'sin' ? Math.sin(rad) : Math.cos(rad);
+                return Math.round(val * scale);
+            });
+
+            updateChart(degrees, generatedData, `${func.toUpperCase()} Values`);
+            showStatus('Data generated successfully!', 'success');
+        }
+
+        function updateChart(labels, data, title) {
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = data;
+            chart.data.datasets[0].label = title;
+            chart.update();
+        }
+
+        function loadData() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.dat';
+            input.onchange = async e => {
+                const file = e.target.files[0];
+                const buffer = await file.arrayBuffer();
+                const size = parseInt(document.getElementById('size').value);
+                const bytesPerEntry = size / 8;
+                const entries = Math.floor(buffer.byteLength / bytesPerEntry);
+                
+                try {
+                    const view = new DataView(buffer);
+                    generatedData = new Array(entries);
+                    let maxAbsValue = 0;
+
+                    // Read the data based on entry size
+                    for(let i = 0; i < entries; i++) {
+                        const offset = i * bytesPerEntry;
+                        let value;
+                        switch(size) {
+                            case 8:
+                                value = view.getUint8(offset);
+                                break;
+                            case 16:
+                                value = view.getInt16(offset, false); // false = big-endian
+                                break;
+                            case 32:
+                                value = view.getInt32(offset, false); // false = big-endian
+                                break;
+                        }
+                        generatedData[i] = value;
+                        maxAbsValue = Math.max(maxAbsValue, Math.abs(value));
+                    }
+
+                    // Update UI with deduced values
+                    document.getElementById('function').value = 'custom';
+                    document.getElementById('entries').value = entries;
+                    document.getElementById('scale').value = maxAbsValue;
+                    document.getElementById('rangeMin').value = 0;
+                    document.getElementById('rangeMax').value = entries - 1;
+
+                    // Update chart with loaded data
+                    const labels = Array.from({length: entries}, (_, i) => i);
+                    updateChart(labels, generatedData, 'Loaded Data');
+                    
+                    showStatus(`Loaded ${entries} entries successfully!`, 'success');
+                } catch (error) {
+                    showStatus('Error loading data: ' + error.message, 'error');
+                }
+            };
+            input.click();
+        }
+
+        function saveData() {
+            if (!generatedData) {
+                showStatus('No data generated yet!', 'error');
+                return;
+            }
+
+            const size = parseInt(document.getElementById('size').value);
+            const buffer = new ArrayBuffer(generatedData.length * (size / 8));
+            const view = new DataView(buffer);
+
+            try {
+                generatedData.forEach((value, i) => {
+                    const offset = i * (size / 8);
+                    switch(size) {
+                        case 8:
+                            view.setUint8(offset, Math.max(0, Math.min(255, value)));
+                            break;
+                        case 16:
+                            view.setInt16(offset, Math.max(-32768, Math.min(32767, value)), false); // false = big-endian
+                            break;
+                        case 32:
+                            view.setInt32(offset, value, false); // false = big-endian
+                            break;
+                    }
+                });
+
+                const blob = new Blob([buffer], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'function_table.dat';
+                a.click();
+                URL.revokeObjectURL(url);
+
+                showStatus('Data saved successfully!', 'success');
+            } catch (error) {
+                showStatus('Error saving data: ' + error.message, 'error');
+            }
+        }
+
+        function saveConfig() {
+            const config = {
+                function: document.getElementById('function').value,
+                rangeMin: document.getElementById('rangeMin').value,
+                rangeMax: document.getElementById('rangeMax').value,
+                scale: document.getElementById('scale').value,
+                entries: document.getElementById('entries').value,
+                size: document.getElementById('size').value
+            };
+
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'function_config.cfg';
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showStatus('Configuration saved successfully!', 'success');
+        }
+
+        function loadConfig() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.cfg';
+            input.onchange = e => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = event => {
+                    try {
+                        const config = JSON.parse(event.target.result);
+                        document.getElementById('function').value = config.function;
+                        document.getElementById('rangeMin').value = config.rangeMin;
+                        document.getElementById('rangeMax').value = config.rangeMax;
+                        document.getElementById('scale').value = config.scale;
+                        document.getElementById('entries').value = config.entries;
+                        document.getElementById('size').value = config.size;
+                        showStatus('Configuration loaded successfully!', 'success');
+                    } catch (error) {
+                        showStatus('Error loading configuration: ' + error.message, 'error');
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status ' + type;
+            setTimeout(() => {
+                status.className = 'status';
+            }, 3000);
+        }
+
+        initChart();
+    </script>
+</body>
+</html>

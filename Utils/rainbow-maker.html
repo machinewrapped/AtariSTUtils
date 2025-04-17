@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Atari ST Rainbow Maker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #visualization {
+            display: flex;
+            align-items: flex-start;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        .color-strip {
+            width: 16px;
+            height: 100px;
+        }
+        #assemblyCode {
+            width: 100%;
+            height: 200px;
+        }
+        #inputContainer {
+            margin-bottom: 20px;
+        }
+        label, input, button {
+            font-size: 14px;
+        }
+        input[type="text"] {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Atari ST Rainbow Maker</h1>
+
+<div id="inputContainer">
+    <label for="colorSteps">Enter Colors and Steps (Format: $RGB[:n]):</label><br>
+    <input type="text" id="colorSteps" value="$000:3, $700:7, $770:7, $070, $077, $007, $707, $777" onchange="generate()"><br><br>
+    <button onclick="generate()">Generate</button>
+</div>
+
+<h2>Visualization:</h2>
+<div id="visualization"></div>
+
+<h2>Assembly Code:</h2>
+<textarea id="assemblyCode" readonly></textarea>
+
+<script>
+function parseAtariColor(atariColor) {
+    // Remove '$' and ensure it's a 3-digit hex number
+    atariColor = atariColor.replace('$', '').padStart(3, '0');
+    // Split into R, G, B components
+    let r = parseInt(atariColor.charAt(0), 16);
+    let g = parseInt(atariColor.charAt(1), 16);
+    let b = parseInt(atariColor.charAt(2), 16);
+    return { r, g, b };
+}
+
+function atariToHexColor(atariColor) {
+    let { r, g, b } = parseAtariColor(atariColor);
+    // Map 0-7 range to 0-255
+    r = Math.round((r / 7) * 255);
+    g = Math.round((g / 7) * 255);
+    b = Math.round((b / 7) * 255);
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+function interpolateColors(color1, color2, steps) {
+    let colors = [];
+    let { r: r1, g: g1, b: b1 } = parseAtariColor(color1);
+    let { r: r2, g: g2, b: b2 } = parseAtariColor(color2);
+
+    for (let i = 1; i <= steps; i++) {
+        let r = Math.round(r1 + (r2 - r1) * (i / steps));
+        let g = Math.round(g1 + (g2 - g1) * (i / steps));
+        let b = Math.round(b1 + (b2 - b1) * (i / steps));
+        colors.push({ r, g, b });
+    }
+    return colors;
+}
+
+function parseInput(input) {
+    let entries = input.split(',').map(s => s.trim());
+    let colorSteps = [];
+
+    entries.forEach(entry => {
+        let [colorPart, stepPart] = entry.split(':').map(s => s.trim());
+        let color = colorPart;
+        let steps = null;
+
+        if (stepPart !== undefined && stepPart !== '') {
+            steps = parseInt(stepPart);
+        }
+
+        colorSteps.push({ color, steps });
+    });
+
+    return colorSteps;
+}
+
+function calculateDefaultSteps(color1, color2) {
+    let { r: r1, g: g1, b: b1 } = parseAtariColor(color1);
+    let { r: r2, g: g2, b: b2 } = parseAtariColor(color2);
+
+    let diffR = Math.abs(r2 - r1);
+    let diffG = Math.abs(g2 - g1);
+    let diffB = Math.abs(b2 - b1);
+
+    let maxDiff = Math.max(diffR, diffG, diffB);
+    return maxDiff || 1; // Ensure at least 1 step
+}
+
+function generate() {
+    let input = document.getElementById('colorSteps').value;
+    let colorSteps = parseInput(input);
+
+    if (colorSteps.length == 0) {
+        colorSteps.push({ color: '$000', steps: 1 });
+    }
+
+    let totalColors = [];
+    let assemblyLines = [];
+    let visualization = document.getElementById('visualization');
+    visualization.innerHTML = '';
+
+    // Process the first color
+    let firstColorEntry = colorSteps[0];
+    let firstColor = firstColorEntry.color;
+    let repeat = firstColorEntry.steps || 1; // steps as repeat count for first color
+
+    // Repeat the first color
+    for (let i = 0; i < repeat; i++) {
+        totalColors.push(parseAtariColor(firstColor));
+        // Add to visualization
+        let strip = document.createElement('div');
+        strip.className = 'color-strip';
+        strip.style.backgroundColor = atariToHexColor(firstColor);
+        visualization.appendChild(strip);
+    }
+
+    // Start assembly code
+    let linePrefix = '\tdc.w ';
+    let lineAssembly = linePrefix;
+    let lineColors = [];
+    for (let i = 0; i < repeat; i++) {
+        lineColors.push(firstColor);
+    }
+
+    // Initial colours
+    let runningTotal = repeat;
+    assemblyLines.push(`${lineAssembly}${lineColors}    ; ${runningTotal}`);
+
+    // Now process transitions
+    for (let idx = 1; idx < colorSteps.length; idx++) {
+        let colorStart = colorSteps[idx - 1].color;
+        let colorEnd = colorSteps[idx].color;
+        let steps = colorSteps[idx].steps; // steps for transition from previous color to this color
+
+        if (steps === null || isNaN(steps)) {
+            // Calculate default steps
+            steps = calculateDefaultSteps(colorStart, colorEnd);
+        }
+
+        let colors = interpolateColors(colorStart, colorEnd, steps);
+
+        let lineAssembly = '\tdc.w ';
+        let lineColors = [];
+
+        colors.forEach((color, index) => {
+            // Convert to Atari $333 format
+            let atariR = Math.min(color.r, 7).toString(8);
+            let atariG = Math.min(color.g, 7).toString(8);
+            let atariB = Math.min(color.b, 7).toString(8);
+
+            let atariColor = `$${atariR}${atariG}${atariB}`;
+
+            lineColors.push(atariColor);
+
+            // Add to visualization
+            let strip = document.createElement('div');
+            strip.className = 'color-strip';
+            strip.style.backgroundColor = atariToHexColor(atariColor);
+            visualization.appendChild(strip);
+
+            totalColors.push(color);
+        });
+
+        runningTotal += lineColors.length;
+        assemblyLines.push(`${lineAssembly}${lineColors}    ; ${runningTotal}`);
+    }
+
+    // Update assembly code
+    document.getElementById('assemblyCode').value = assemblyLines.join('\n');
+}
+
+window.onload = generate;
+</script>
+
+</body>
+</html>
