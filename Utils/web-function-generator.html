@@ -68,29 +68,36 @@
             border-radius: 8px;
             height: 400px;
         }
-        /* New styles for min/max display below chart */
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .checkbox-group input[type="checkbox"] {
+             cursor: pointer;
+        }
         .min-max-display {
             grid-column: 2 / 3; /* Align with the chart column */
             display: flex;
             justify-content: space-around;
             padding: 10px 20px;
             background: #f8f8f8;
-            border-radius: 0 0 8px 8px; /* Round bottom corners */
-            margin-top: -20px; /* Overlap slightly with chart padding */
-            position: relative; /* Needed for z-index */
-            z-index: 1; /* Ensure it's above chart background if overlapping */
+            border-radius: 0 0 8px 8px;
+            margin-top: -20px;
+            position: relative;
+            z-index: 1;
             font-size: 14px;
             color: #333;
-            border: 1px solid #eee; /* Optional border */
-            border-top: none; /* Remove top border */
+            border: 1px solid #eee;
+            border-top: none;
         }
-        .min-max-display span span { /* Style the actual value spans */
+        .min-max-display span span { 
             font-weight: bold;
             margin-left: 5px;
             padding: 2px 5px;
             background: #eee;
             border-radius: 3px;
-            min-width: 30px; /* Ensure some minimum width */
+            min-width: 30px; 
             display: inline-block; /* Allow padding/width */
             text-align: right;
         }
@@ -166,6 +173,12 @@
                     <option value="32">32</option>
                 </select>
             </div>
+                <div class="control-group">
+                    <div class="checkbox-group">
+                    <label for="signedCheckbox">Signed</label>
+                    <input type="checkbox" id="signedCheckbox" checked>
+                </div>
+            </div>            
         </div>
         <div class="chart-container">
             <canvas id="chart"></canvas>
@@ -181,28 +194,36 @@
         let chart = null;
         let generatedData = null;
 
-        // --- Helper function for clamping ---
-        function clampValue(value, size) {
+        function clampValue(value, size, isSigned) {
             const roundedValue = Math.round(value);
             switch(size) {
                 case 8:
-                    // Clamp to valid unsigned 8-bit range
-                    return Math.max(0, Math.min(255, roundedValue));
+                    // Use isSigned to determine range
+                    if (isSigned) {
+                        return Math.max(-128, Math.min(127, roundedValue));
+                    } else {
+                        return Math.max(0, Math.min(255, roundedValue));
+                    }
                 case 16:
-                    // Clamp to valid signed 16-bit range
-                    return Math.max(-32768, Math.min(32767, roundedValue));
+                    if (isSigned) {
+                        return Math.max(-32768, Math.min(32767, roundedValue));
+                    } else {
+                        return Math.max(0, Math.min(65535, roundedValue));
+                    }
                 case 32:
-                    // Clamp to valid signed 32-bit range (JavaScript numbers are 64-bit floats,
-                    // but DataView uses signed 32-bit integers)
-                    // Note: Math.pow(2, 31) is slightly inaccurate due to float precision.
-                    const minInt32 = -2147483648;
-                    const maxInt32 = 2147483647;
-                    return Math.max(minInt32, Math.min(maxInt32, roundedValue));
+                    if (isSigned) {
+                        const minInt32 = -2147483648;
+                        const maxInt32 = 2147483647;
+                        return Math.max(minInt32, Math.min(maxInt32, roundedValue));
+                    } else {
+                        const minUInt32 = 0;
+                        const maxUInt32 = 4294967295;
+                        return Math.max(minUInt32, Math.min(maxUInt32, roundedValue));
+                    }
                 default:
-                    return roundedValue; // Should not happen with select options
+                    return roundedValue;
             }
         }
-        // --- End Helper ---
 
         function initChart() {
             const ctx = document.getElementById('chart').getContext('2d');
@@ -228,21 +249,18 @@
                 }
             });
 
-            // --- Add event listener for size change ---
-            document.getElementById('size').addEventListener('change', handleSizeChange);
-            // --- End Add event listener ---
+           document.getElementById('size').addEventListener('change', () => invalidateData('Entry size changed. Please regenerate data.'));
+           document.getElementById('function').addEventListener('change', () => invalidateData('Function type changed. Please regenerate data.'));
+           document.getElementById('signedCheckbox').addEventListener('change', () => invalidateData('Signedness changed. Please regenerate data.'));
         }
 
-        // --- New function to handle size change ---
-        function handleSizeChange() {
-            if (generatedData) {
-                generatedData = null; // Invalidate existing data
-                updateChart([], [], 'No Data'); // Clear the chart
-                updateMinMaxDisplay([]); // Clear min/max display
-                showStatus('Entry size changed. Please regenerate data.', 'success'); // Use 'success' or a neutral style
+        function invalidateData(reasonMessage) {
+             if (generatedData) {
+                generatedData = null;
+                updateChart([], [], 'No Data');
+                showStatus(reasonMessage, 'success');
             }
         }
-        // --- End New function ---
 
         function generateData() {
             const func = document.getElementById('function').value;
@@ -250,7 +268,8 @@
             const maxDeg = parseFloat(document.getElementById('rangeMax').value);
             const scale = parseFloat(document.getElementById('scale').value);
             const entries = parseInt(document.getElementById('entries').value);
-            const size = parseInt(document.getElementById('size').value); // Get selected size
+            const size = parseInt(document.getElementById('size').value);
+            const isSigned = document.getElementById('signedCheckbox').checked;
 
             if (isNaN(minDeg) || isNaN(maxDeg) || isNaN(scale) || isNaN(entries) || entries <= 1) {
                  showStatus('Invalid input parameters.', 'error');
@@ -275,12 +294,11 @@
                     default: val = 0; // Handle custom case if needed, or default
                 }
                 const scaledValue = val * scale;
-                // --- Clamp the value based on the selected size ---
-                return clampValue(scaledValue, size);
-                // --- End Clamp ---
+                return clampValue(scaledValue, size, isSigned);
             });
 
-            updateChart(degrees, generatedData, `${func.toUpperCase()} Values (${size}-bit)`); // Add size to title
+            const signednessLabel = isSigned ? 'Signed' : 'Unsigned';
+            updateChart(degrees, generatedData, `${func.toUpperCase()} Values (${size}-bit ${signednessLabel})`); 
             showStatus('Data generated successfully!', 'success');
         }
 
@@ -321,7 +339,8 @@
                 if (!file) return;
 
                 const buffer = await file.arrayBuffer();
-                const size = parseInt(document.getElementById('size').value); // Use current size setting for reading
+                const size = parseInt(document.getElementById('size').value);       // Use current size setting for reading
+                const isSigned = document.getElementById('signedCheckbox').checked; // Use current signedness setting for reading
                 const bytesPerEntry = size / 8;
 
                 if (buffer.byteLength === 0 || buffer.byteLength % bytesPerEntry !== 0) {
@@ -334,8 +353,8 @@
                 try {
                     const view = new DataView(buffer);
                     generatedData = new Array(entries);
-                    let minVal = Infinity; // Renamed for clarity
-                    let maxVal = -Infinity; // Renamed for clarity
+                    let minVal = Infinity;
+                    let maxVal = -Infinity;
 
                     // Read the data based on entry size
                     for(let i = 0; i < entries; i++) {
@@ -343,14 +362,13 @@
                         let value;
                         switch(size) {
                             case 8:
-                                // Assuming loaded 8-bit data is unsigned as per save logic
-                                value = view.getUint8(offset);
+                                value = isSigned ? view.getUint8(offset) : view.getInt8(offset);
                                 break;
                             case 16:
-                                value = view.getInt16(offset, false); // false = big-endian
+                                value = isSigned ? view.getInt16(offset, false) : view.getUint16(offset, false); // false = big-endian
                                 break;
                             case 32:
-                                value = view.getInt32(offset, false); // false = big-endian
+                                value = isSigned ? view.getInt32(offset, false) : view.getUint32(offset, false); // false = big-endian
                                 break;
                             default:
                                 throw new Error(`Unsupported entry size: ${size}`);
@@ -360,24 +378,20 @@
                         maxVal = Math.max(maxVal, value);
                     }
 
-                    document.getElementById('function').value = 'custom'; // Mark as custom since it's loaded
+                    document.getElementById('function').value = 'custom';
                     document.getElementById('entries').value = entries;
-                    // Estimate scale based on max absolute value found in the data
                     const estimatedScale = Math.max(Math.abs(minVal), Math.abs(maxVal));
                     document.getElementById('scale').value = estimatedScale > 0 ? estimatedScale : 1; // Avoid scale 0
                     document.getElementById('rangeMin').value = 0;
-                    document.getElementById('rangeMax').value = entries - 1; // Use index as label
+                    document.getElementById('rangeMax').value = entries - 1;
 
-                    // Update chart with loaded data (using index as label)
                     const labels = Array.from({length: entries}, (_, i) => i);
-                    updateChart(labels, generatedData, `Loaded Data (${size}-bit)`); // Add size to title
+                    updateChart(labels, generatedData, `Loaded Data (${size}-bit)`);
                     showStatus(`Loaded ${entries} entries successfully!`, 'success');
                 } catch (error) {
                     showStatus('Error loading data: ' + error.message, 'error');
-                    // Clear potentially inconsistent state
                     generatedData = null;
                     updateChart([], [], 'No Data');
-                    updateMinMaxDisplay([]);
                 }
             };
             input.click();
@@ -390,6 +404,7 @@
             }
 
             const size = parseInt(document.getElementById('size').value);
+            const isSigned = document.getElementById('signedCheckbox').checked;
             const bytesPerEntry = size / 8;
             const buffer = new ArrayBuffer(generatedData.length * bytesPerEntry);
             const view = new DataView(buffer);
@@ -399,16 +414,25 @@
                     const offset = i * bytesPerEntry;
                     switch(size) {
                         case 8:
-                            // Value should already be in 0-255 range
-                            view.setUint8(offset, value);
+                            if (isSigned) {
+                                view.setInt8(offset, value);
+                            } else {
+                                view.setUint8(offset, value);
+                            }
                             break;
                         case 16:
-                             // Value should already be in -32768 to 32767 range
-                            view.setInt16(offset, value, false); // false = big-endian
+                            if (isSigned) {
+                                view.setInt16(offset, value, false); // false = big-endian
+                            } else {
+                                view.setUint16(offset, value, false); // false = big-endian
+                            }
                             break;
                         case 32:
-                             // Value should already be in -2^31 to 2^31-1 range
-                            view.setInt32(offset, value, false); // false = big-endian
+                            if (isSigned) {
+                                view.setInt32(offset, value, false); // false = big-endian
+                            } else {
+                                view.setUint32(offset, value, false); // false = big-endian
+                            }
                             break;
                          default:
                             throw new Error(`Unsupported entry size: ${size}`);
@@ -438,7 +462,8 @@
                 rangeMax: document.getElementById('rangeMax').value,
                 scale: document.getElementById('scale').value,
                 entries: document.getElementById('entries').value,
-                size: document.getElementById('size').value
+                size: document.getElementById('size').value,
+                isSigned: document.getElementById('signedCheckbox').checked
             };
 
             const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
@@ -463,23 +488,26 @@
                 reader.onload = event => {
                     try {
                         const config = JSON.parse(event.target.result);
-                        const previousSize = document.getElementById('size').value; // Get size before loading
+                        const previousSize = document.getElementById('size').value;
+                        const previousSigned = document.getElementById('signedCheckbox').checked;
+
                         document.getElementById('function').value = config.function ?? 'sin';
                         document.getElementById('rangeMin').value = config.rangeMin ?? 0;
                         document.getElementById('rangeMax').value = config.rangeMax ?? 360;
                         document.getElementById('scale').value = config.scale ?? 32768;
                         document.getElementById('entries').value = config.entries ?? 360;
                         document.getElementById('size').value = config.size ?? 16;
+                        document.getElementById('signedCheckbox').checked = config.isSigned ?? true;
 
-                        // If size changed during load, invalidate old data before generating new
-                        if (generatedData && document.getElementById('size').value !== previousSize) {
-                             generatedData = null;
-                             updateChart([], [], 'No Data');
-                             updateMinMaxDisplay([]);
+                        // Invalidate data if size OR signedness changed
+                        const currentSize = document.getElementById('size').value;
+                        const currentSigned = document.getElementById('signedCheckbox').checked;
+                        if (generatedData && (currentSize !== previousSize || currentSigned !== previousSigned)) {
+                             invalidateData('Configuration loaded with different size/signedness. Please regenerate data.');
+                        } else {
+                             showStatus('Configuration loaded successfully! Regenerating data...', 'success');
                         }
 
-                        showStatus('Configuration loaded successfully! Regenerating data...', 'success');
-                        // Use setTimeout to allow the status message to render before potentially blocking generation
                         setTimeout(generateData, 50);
                     } catch (error) {
                         showStatus('Error loading configuration: ' + error.message, 'error');
