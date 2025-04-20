@@ -4,6 +4,7 @@
     <title>Function Table Generator</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
     <style>
+        /* ... existing styles ... */
         body {
             font-family: system-ui, -apple-system, sans-serif;
             max-width: 1200px;
@@ -67,14 +68,45 @@
             border-radius: 8px;
             height: 400px;
         }
+        /* New styles for min/max display below chart */
+        .min-max-display {
+            grid-column: 2 / 3; /* Align with the chart column */
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 20px;
+            background: #f8f8f8;
+            border-radius: 0 0 8px 8px; /* Round bottom corners */
+            margin-top: -20px; /* Overlap slightly with chart padding */
+            position: relative; /* Needed for z-index */
+            z-index: 1; /* Ensure it's above chart background if overlapping */
+            font-size: 14px;
+            color: #333;
+            border: 1px solid #eee; /* Optional border */
+            border-top: none; /* Remove top border */
+        }
+        .min-max-display span span { /* Style the actual value spans */
+            font-weight: bold;
+            margin-left: 5px;
+            padding: 2px 5px;
+            background: #eee;
+            border-radius: 3px;
+            min-width: 30px; /* Ensure some minimum width */
+            display: inline-block; /* Allow padding/width */
+            text-align: right;
+        }
         .range-group {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             gap: 10px;
             align-items: center;
         }
+        .range-group input[type="number"] {
+            min-width: 0; /* Allows the input to shrink below its default minimum */
+            width: 100%; /* Encourages the input to fill its grid column */
+            box-sizing: border-box; /* Ensures padding/border are included in the width calculation */
+        }
         .status {
-            grid-column: 1 / -1;
+            grid-column: 1 / -1; /* Ensure status spans full width */
             padding: 10px;
             margin-top: 20px;
             border-radius: 4px;
@@ -138,12 +170,39 @@
         <div class="chart-container">
             <canvas id="chart"></canvas>
         </div>
+        <div class="min-max-display">
+            <span>Min Value: <span id="minValueDisplay">N/A</span></span>
+            <span>Max Value: <span id="maxValueDisplay">N/A</span></span>
+        </div>
         <div id="status" class="status"></div>
     </div>
 
     <script>
         let chart = null;
         let generatedData = null;
+
+        // --- Helper function for clamping ---
+        function clampValue(value, size) {
+            const roundedValue = Math.round(value);
+            switch(size) {
+                case 8:
+                    // Clamp to valid unsigned 8-bit range
+                    return Math.max(0, Math.min(255, roundedValue));
+                case 16:
+                    // Clamp to valid signed 16-bit range
+                    return Math.max(-32768, Math.min(32767, roundedValue));
+                case 32:
+                    // Clamp to valid signed 32-bit range (JavaScript numbers are 64-bit floats,
+                    // but DataView uses signed 32-bit integers)
+                    // Note: Math.pow(2, 31) is slightly inaccurate due to float precision.
+                    const minInt32 = -2147483648;
+                    const maxInt32 = 2147483647;
+                    return Math.max(minInt32, Math.min(maxInt32, roundedValue));
+                default:
+                    return roundedValue; // Should not happen with select options
+            }
+        }
+        // --- End Helper ---
 
         function initChart() {
             const ctx = document.getElementById('chart').getContext('2d');
@@ -163,12 +222,27 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            beginAtZero: true
+                            beginAtZero: false // Allow negative values for SIN/COS
                         }
                     }
                 }
             });
+
+            // --- Add event listener for size change ---
+            document.getElementById('size').addEventListener('change', handleSizeChange);
+            // --- End Add event listener ---
         }
+
+        // --- New function to handle size change ---
+        function handleSizeChange() {
+            if (generatedData) {
+                generatedData = null; // Invalidate existing data
+                updateChart([], [], 'No Data'); // Clear the chart
+                updateMinMaxDisplay([]); // Clear min/max display
+                showStatus('Entry size changed. Please regenerate data.', 'success'); // Use 'success' or a neutral style
+            }
+        }
+        // --- End New function ---
 
         function generateData() {
             const func = document.getElementById('function').value;
@@ -176,27 +250,66 @@
             const maxDeg = parseFloat(document.getElementById('rangeMax').value);
             const scale = parseFloat(document.getElementById('scale').value);
             const entries = parseInt(document.getElementById('entries').value);
+            const size = parseInt(document.getElementById('size').value); // Get selected size
+
+            if (isNaN(minDeg) || isNaN(maxDeg) || isNaN(scale) || isNaN(entries) || entries <= 1) {
+                 showStatus('Invalid input parameters.', 'error');
+                 return;
+            }
+            if (maxDeg <= minDeg && entries > 1) {
+                 showStatus('Max range must be greater than min range.', 'error');
+                 return;
+            }
 
             // Generate x values (degrees)
-            const step = (maxDeg - minDeg) / (entries - 1);
+            const step = entries > 1 ? (maxDeg - minDeg) / (entries - 1) : 0; // Avoid division by zero if entries = 1
             const degrees = Array.from({length: entries}, (_, i) => minDeg + i * step);
-            
+
             // Generate y values
             generatedData = degrees.map(deg => {
                 const rad = deg * Math.PI / 180;
-                const val = func === 'sin' ? Math.sin(rad) : Math.cos(rad);
-                return Math.round(val * scale);
+                let val;
+                switch(func) {
+                    case 'sin': val = Math.sin(rad); break;
+                    case 'cos': val = Math.cos(rad); break;
+                    default: val = 0; // Handle custom case if needed, or default
+                }
+                const scaledValue = val * scale;
+                // --- Clamp the value based on the selected size ---
+                return clampValue(scaledValue, size);
+                // --- End Clamp ---
             });
 
-            updateChart(degrees, generatedData, `${func.toUpperCase()} Values`);
+            updateChart(degrees, generatedData, `${func.toUpperCase()} Values (${size}-bit)`); // Add size to title
             showStatus('Data generated successfully!', 'success');
         }
 
         function updateChart(labels, data, title) {
+            if (!chart) return; // Ensure chart is initialized
             chart.data.labels = labels;
             chart.data.datasets[0].data = data;
             chart.data.datasets[0].label = title;
             chart.update();
+
+            updateMinMaxDisplay(data);
+        }
+
+        function updateMinMaxDisplay(dataArray) {
+            const minDisplay = document.getElementById('minValueDisplay');
+            const maxDisplay = document.getElementById('maxValueDisplay');
+
+            if (!dataArray || dataArray.length === 0) {
+                minDisplay.textContent = 'N/A';
+                maxDisplay.textContent = 'N/A';
+            } else {
+                // Calculate min and max from the array
+                // Since data is already clamped, Math.min/max is safe
+                const minValue = Math.min(...dataArray);
+                const maxValue = Math.max(...dataArray);
+
+                minDisplay.textContent = minValue;
+                maxDisplay.textContent = maxValue;
+            }
         }
 
         function loadData() {
@@ -205,15 +318,24 @@
             input.accept = '.dat';
             input.onchange = async e => {
                 const file = e.target.files[0];
+                if (!file) return;
+
                 const buffer = await file.arrayBuffer();
-                const size = parseInt(document.getElementById('size').value);
+                const size = parseInt(document.getElementById('size').value); // Use current size setting for reading
                 const bytesPerEntry = size / 8;
-                const entries = Math.floor(buffer.byteLength / bytesPerEntry);
-                
+
+                if (buffer.byteLength === 0 || buffer.byteLength % bytesPerEntry !== 0) {
+                    showStatus(`Error loading data: File size (${buffer.byteLength}) is not a multiple of selected entry size (${bytesPerEntry} bytes).`, 'error');
+                    return;
+                }
+
+                const entries = buffer.byteLength / bytesPerEntry;
+
                 try {
                     const view = new DataView(buffer);
                     generatedData = new Array(entries);
-                    let maxAbsValue = 0;
+                    let minVal = Infinity; // Renamed for clarity
+                    let maxVal = -Infinity; // Renamed for clarity
 
                     // Read the data based on entry size
                     for(let i = 0; i < entries; i++) {
@@ -221,6 +343,7 @@
                         let value;
                         switch(size) {
                             case 8:
+                                // Assuming loaded 8-bit data is unsigned as per save logic
                                 value = view.getUint8(offset);
                                 break;
                             case 16:
@@ -229,53 +352,66 @@
                             case 32:
                                 value = view.getInt32(offset, false); // false = big-endian
                                 break;
+                            default:
+                                throw new Error(`Unsupported entry size: ${size}`);
                         }
                         generatedData[i] = value;
-                        maxAbsValue = Math.max(maxAbsValue, Math.abs(value));
+                        minVal = Math.min(minVal, value);
+                        maxVal = Math.max(maxVal, value);
                     }
 
-                    // Update UI with deduced values
-                    document.getElementById('function').value = 'custom';
+                    document.getElementById('function').value = 'custom'; // Mark as custom since it's loaded
                     document.getElementById('entries').value = entries;
-                    document.getElementById('scale').value = maxAbsValue;
+                    // Estimate scale based on max absolute value found in the data
+                    const estimatedScale = Math.max(Math.abs(minVal), Math.abs(maxVal));
+                    document.getElementById('scale').value = estimatedScale > 0 ? estimatedScale : 1; // Avoid scale 0
                     document.getElementById('rangeMin').value = 0;
-                    document.getElementById('rangeMax').value = entries - 1;
+                    document.getElementById('rangeMax').value = entries - 1; // Use index as label
 
-                    // Update chart with loaded data
+                    // Update chart with loaded data (using index as label)
                     const labels = Array.from({length: entries}, (_, i) => i);
-                    updateChart(labels, generatedData, 'Loaded Data');
-                    
+                    updateChart(labels, generatedData, `Loaded Data (${size}-bit)`); // Add size to title
                     showStatus(`Loaded ${entries} entries successfully!`, 'success');
                 } catch (error) {
                     showStatus('Error loading data: ' + error.message, 'error');
+                    // Clear potentially inconsistent state
+                    generatedData = null;
+                    updateChart([], [], 'No Data');
+                    updateMinMaxDisplay([]);
                 }
             };
             input.click();
         }
 
         function saveData() {
-            if (!generatedData) {
-                showStatus('No data generated yet!', 'error');
+            if (!generatedData || generatedData.length === 0) {
+                showStatus('No data generated or loaded yet!', 'error');
                 return;
             }
 
             const size = parseInt(document.getElementById('size').value);
-            const buffer = new ArrayBuffer(generatedData.length * (size / 8));
+            const bytesPerEntry = size / 8;
+            const buffer = new ArrayBuffer(generatedData.length * bytesPerEntry);
             const view = new DataView(buffer);
 
             try {
                 generatedData.forEach((value, i) => {
-                    const offset = i * (size / 8);
+                    const offset = i * bytesPerEntry;
                     switch(size) {
                         case 8:
-                            view.setUint8(offset, Math.max(0, Math.min(255, value)));
+                            // Value should already be in 0-255 range
+                            view.setUint8(offset, value);
                             break;
                         case 16:
-                            view.setInt16(offset, Math.max(-32768, Math.min(32767, value)), false); // false = big-endian
+                             // Value should already be in -32768 to 32767 range
+                            view.setInt16(offset, value, false); // false = big-endian
                             break;
                         case 32:
+                             // Value should already be in -2^31 to 2^31-1 range
                             view.setInt32(offset, value, false); // false = big-endian
                             break;
+                         default:
+                            throw new Error(`Unsupported entry size: ${size}`);
                     }
                 });
 
@@ -283,7 +419,9 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'function_table.dat';
+                const funcName = document.getElementById('function').value;
+                const entries = document.getElementById('entries').value;
+                a.download = `${funcName}_${entries}_${size}.dat`;
                 a.click();
                 URL.revokeObjectURL(url);
 
@@ -317,24 +455,39 @@
         function loadConfig() {
             const input = document.createElement('input');
             input.type = 'file';
-            input.accept = '.cfg';
+            input.accept = '.cfg, .json';
             input.onchange = e => {
                 const file = e.target.files[0];
+                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = event => {
                     try {
                         const config = JSON.parse(event.target.result);
-                        document.getElementById('function').value = config.function;
-                        document.getElementById('rangeMin').value = config.rangeMin;
-                        document.getElementById('rangeMax').value = config.rangeMax;
-                        document.getElementById('scale').value = config.scale;
-                        document.getElementById('entries').value = config.entries;
-                        document.getElementById('size').value = config.size;
-                        showStatus('Configuration loaded successfully!', 'success');
+                        const previousSize = document.getElementById('size').value; // Get size before loading
+                        document.getElementById('function').value = config.function ?? 'sin';
+                        document.getElementById('rangeMin').value = config.rangeMin ?? 0;
+                        document.getElementById('rangeMax').value = config.rangeMax ?? 360;
+                        document.getElementById('scale').value = config.scale ?? 32768;
+                        document.getElementById('entries').value = config.entries ?? 360;
+                        document.getElementById('size').value = config.size ?? 16;
+
+                        // If size changed during load, invalidate old data before generating new
+                        if (generatedData && document.getElementById('size').value !== previousSize) {
+                             generatedData = null;
+                             updateChart([], [], 'No Data');
+                             updateMinMaxDisplay([]);
+                        }
+
+                        showStatus('Configuration loaded successfully! Regenerating data...', 'success');
+                        // Use setTimeout to allow the status message to render before potentially blocking generation
+                        setTimeout(generateData, 50);
                     } catch (error) {
                         showStatus('Error loading configuration: ' + error.message, 'error');
                     }
                 };
+                 reader.onerror = () => {
+                     showStatus('Error reading configuration file.', 'error');
+                 };
                 reader.readAsText(file);
             };
             input.click();
@@ -344,12 +497,17 @@
             const status = document.getElementById('status');
             status.textContent = message;
             status.className = 'status ' + type;
-            setTimeout(() => {
+            if (status.timeoutId) {
+                clearTimeout(status.timeoutId);
+            }
+            status.timeoutId = setTimeout(() => {
                 status.className = 'status';
-            }, 3000);
+                status.timeoutId = null;
+            }, 5000);
         }
 
-        initChart();
+        // Initialize chart on load
+        window.onload = initChart;
     </script>
 </body>
 </html>
